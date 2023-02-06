@@ -4,7 +4,9 @@
 #include <cstring>
 #include <filesystem>
 #include <iostream>
+#include <thread>
 
+using namespace std::chrono_literals;
 using namespace MapReduce;
 namespace fs = std::filesystem;
 
@@ -20,19 +22,6 @@ void printVecOfVecs(const std::vector<std::vector<std::string>> &vecOfVecs) {
   for (const auto &vec : vecOfVecs) {
     printVec(vec);
   }
-}
-
-Words getWordsToCount(const char *const *words, const int nrOfWords) {
-  Words wordsToCount;
-  if (nrOfWords < 3) {
-    return {};
-  }
-
-  for (int i = 4; i < nrOfWords; ++i) {
-    wordsToCount.emplace_back(words[i]);
-  }
-
-  return wordsToCount;
 }
 
 std::string getProcessNrToSpawn(const char *const *argv) { return argv[1]; }
@@ -51,6 +40,7 @@ int main(int argc, char *argv[]) {
 
   MPI_Comm_size(MPI_COMM_WORLD, &count);
   MPI_Comm_rank(MPI_COMM_WORLD, &id);
+
   auto sendFromMasterToWorkers =
       [&](const int idReceiver, const std::vector<std::string> &arrayToSend) {
         int numberOfMessages = arrayToSend.size();
@@ -80,9 +70,10 @@ int main(int argc, char *argv[]) {
 
   const std::string folderToWriteIn{"../../intermediary/"};
   const std::string resultFolder{"../../result"};
+  int nrProcessesToSpawn;
 
   if (parentcomm == MPI_COMM_NULL) {
-    int nrProcessesToSpawn = std::stoi(getProcessNrToSpawn(argv));
+    nrProcessesToSpawn = std::stoi(getProcessNrToSpawn(argv));
 
     int errcodes[nrProcessesToSpawn];
 
@@ -102,7 +93,7 @@ int main(int argc, char *argv[]) {
     removeFolder(resultFolder);
     fs::create_directory(resultFolder);
 
-    MPI_Comm_spawn(argv[0], argv, nrProcessesToSpawn, MPI_INFO_NULL, 0,
+    MPI_Comm_spawn(argv[0], argv, 2 * nrProcessesToSpawn, MPI_INFO_NULL, 0,
                    MPI_COMM_WORLD, &intercomm, errcodes);
 
     printf("I'm the parent: %d\n", id);
@@ -110,8 +101,7 @@ int main(int argc, char *argv[]) {
     for (int i = 0; i < nrProcessesToSpawn; ++i) {
       sendFromMasterToWorkers(i, vecOfVecs[i]);
     }
-  } else {
-
+  } else if (id < count / 2) {
     printf("I'm the spawned: %d\n", id);
     const auto filesToHandle = receiveArrayOfString();
     const auto wordsCountedFromFiles =
@@ -120,17 +110,42 @@ int main(int argc, char *argv[]) {
                 wordsCountedFromFiles);
   }
 
-  if (parentcomm != MPI_COMM_NULL) {
+  if (parentcomm == MPI_COMM_NULL) {
+
+    std::vector<std::string> wordsToCount;
+    while (wordsToCount.size() < nrProcessesToSpawn) {
+      wordsToCount = getFileNamesInsideDirectory(folderToWriteIn);
+    }
+    wordsToCount = getFileNamesInsideDirectoryLvl2(folderToWriteIn);
+
+    const auto splitedWordsToCount =
+        splitVector(wordsToCount, nrProcessesToSpawn);
+
+    std::cout << "Splited words to count: " << splitedWordsToCount.size()
+              << std::endl;
+    for (int i = 0; i < splitedWordsToCount.size(); ++i) {
+
+      sendFromMasterToWorkers(2 * splitedWordsToCount.size() - i - 1,
+                              splitedWordsToCount[i]);
+      std::this_thread::sleep_for(10ms);
+    }
+
+  } else {
     MPI_Barrier(MPI_COMM_WORLD);
-    Words wordsToCount = getWordsToCount(argv, argc);
-    printVec(wordsToCount);
-    const auto splitedWordsToCount = splitVector(wordsToCount, count);
 
-    std::unordered_map<std::string, std::unordered_map<std::string, size_t>>
-        reduceResult;
+    if (id >= count / 2) {
+      std::cout << "I am worker: " << id << std::endl;
+      std::unordered_map<std::string, std::unordered_map<std::string, size_t>>
+          reduceResult;
 
-    if (id < splitedWordsToCount.size()) {
-      reduceResult = reduce(folderToWriteIn, splitedWordsToCount[id]);
+      const auto wordsToCount = receiveArrayOfString();
+
+      // std::this_thread::sleep_for(10ms);
+      if (id == 8) {
+        printVec(wordsToCount);
+      }
+
+      reduceResult = reduce(folderToWriteIn, wordsToCount);
 
       writeResultReduce(resultFolder, reduceResult);
     }

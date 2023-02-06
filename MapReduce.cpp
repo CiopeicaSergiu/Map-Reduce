@@ -1,9 +1,11 @@
 
 #include "MapReduce.h"
+#include <algorithm>
 #include <boost/algorithm/string.hpp>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <iterator>
 
 namespace MapReduce {
 namespace fs = std::filesystem;
@@ -188,7 +190,6 @@ reduce(const std::string &folderPath,
                                            fileInLvl2Copy)) {
         continue;
       }
-      std::cout << fileInLvl2Copy << std::endl;
 
       if (countedWordsFromFile.cend() ==
           countedWordsFromFile.find(fileInLvl2Copy)) {
@@ -242,4 +243,22 @@ void printMap(const std::unordered_map<std::string, size_t> &myMap) {
   }
   std::cout << std::endl;
 }
+
+Words getFileNamesInsideDirectoryLvl2(const std::string &path) {
+  Words result;
+  const auto subfolders = getFileNamesInsideDirectory(path);
+  for (const auto &subfolder : subfolders) {
+    auto fileNames = getFileNamesInsideDirectory(subfolder);
+    std::transform(fileNames.begin(), fileNames.end(), fileNames.begin(),
+                   [](const auto &file) {
+                     const auto auxFile =
+                         file.substr(file.find_last_of("/") + 1);
+                     return auxFile.substr(0, auxFile.find(".txt"));
+                   });
+    std::copy(fileNames.cbegin(), fileNames.cend(), std::back_inserter(result));
+  }
+
+  return result;
+}
+
 } // namespace MapReduce

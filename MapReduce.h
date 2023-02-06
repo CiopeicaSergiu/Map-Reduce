@@ -25,4 +25,5 @@ void writeResultReduce(const std::string &folderToWriteIn,
                        const FilesWordsBucket &filesWordsBucket);
 
 void printMap(const std::unordered_map<std::string, size_t> &myMap);
+Words getFileNamesInsideDirectoryLvl2(const std::string &path);
 } // namespace MapReduce
